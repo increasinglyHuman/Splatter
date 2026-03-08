@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>SplatPainter</title>
+  <link rel="stylesheet" href="./styles/theme.css">
+</head>
+<body>
+  <!-- Paint surface -->
+  <canvas id="paint-canvas"></canvas>
+
+  <!-- Brush cursor overlay -->
+  <div id="brush-cursor"></div>
+
+  <!-- Status flash — top center -->
+  <div id="status"></div>
+
+  <!-- Toolbar — left edge, stealth auto-hide -->
+  <div id="toolbar"></div>
+
+  <!-- Texture palette — bottom edge, stealth auto-hide -->
+  <div id="palette"></div>
+
+  <!-- Brush settings — top right, stealth auto-hide -->
+  <div id="brush-settings"></div>
+
+  <!-- Keyboard hint — fades in after idle -->
+  <div id="keyboard-hint"></div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

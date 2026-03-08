@@ -1905,6 +1905,67 @@ World is ready to begin host integration (#18) and compositor skeleton (#17).
 
 ---
 
+## Terraformer Update 3 — JFA GPU SDF Optimization (2026-03-08)
+
+### What's New
+
+**Jump Flood Algorithm (JFA) GPU SDF Baker** — `PathSDF_JFA.ts`
+
+The brute-force CPU SDF bake was O(res² × splines × samples), taking ~180ms+ at 512×512 on integrated GPUs. We've added a GPU-accelerated alternative using the Jump Flood Algorithm:
+
+- **Performance**: O(res² × log₂(res)) — 9 passes at 512×512 vs thousands of inner-loop iterations
+- **Implementation**: WebGL2 framebuffer ping-pong with RGBA32F seed textures, GLSL 300 es fragment shader
+- **Fallback**: Automatic CPU fallback when WebGL2 or EXT_color_buffer_float is unavailable
+- **Seed rasterization**: Spline sample points are rasterized to the grid with influence-radius coverage, each seed carrying world-space distance and spline index
+
+### Architecture
+
+```
+bakePathSDF()
+  ├─ canUseJFA(scene) → true?
+  │   └─ bakePathSDF_JFA()
+  │       ├─ generateSeeds() — CPU rasterization of spline samples onto grid
+  │       ├─ Upload RGBA32F seed texture
+  │       ├─ JFA passes: step = res/2, res/4, ..., 1, +1 refinement
+  │       ├─ readPixels → Float32Array
+  │       └─ Convert to PathSDFData format (RG pairs: distance + pathIndex)
+  └─ fallback: bakePathSDF_CPU() — original brute-force (unchanged)
+```
+
+### Files Changed
+
+| File | Changes |
+|------|---------|
+| `src/terrain/PathSDF_JFA.ts` | **NEW** — JFA module: `canUseJFA()`, `generateSeeds()`, `bakePathSDF_JFA()`, WebGL2 shader/FBO helpers |
+| `src/terrain/PathSystem.ts` | `bakePathSDF()` tries GPU first, falls back to `bakePathSDF_CPU()` |
+| `src/__tests__/PathSpline.test.ts` | +7 JFA tests (seed generation, dedup, null safety, CPU fallback) |
+
+### Test Results
+
+- **147 tests pass** across 6 suites (up from 140)
+- Build: 665 KB main bundle (stable)
+- JFA GPU path untestable in jsdom — tested via seed generation unit tests + CPU fallback verification
+
+### Tracker Update
+
+| # | Item | Status |
+|:-:|------|--------|
+| 19 | JFA GPU SDF optimization | **Complete** — automatic GPU/CPU selection |
+
+### Impact on Other Teams
+
+**No breaking changes.** The SDF output format (`PathSDFData`: RG float pairs) is unchanged. BBT export/import is unaffected. The JFA optimization is transparent to consumers — same data, faster bake.
+
+**For Splatter/SplatPainter**: When we eventually pass path SDF data via `SPLATPAINTER_INIT`, the data format will be identical whether GPU or CPU was used.
+
+---
+
+*Terraformer Team (BlackBoxTerrains) — 2026-03-08*
+*JFA GPU SDF optimization complete | 147 tests | Sprint 5D items closing out*
+*AI Engineer: Claude Opus 4.6 | Technical Lead: Allen Partridge*
+
+---
+
 ## Splatter Team — ADR-003 Ratified + Tracker Update (2026-03-09)
 
 ### ADR-003: RATIFIED

@@ -1,0 +1,25 @@
+{
+  "name": "@poqpoq/splatpainter",
+  "version": "1.0.0",
+  "description": "Terrain texture painting micro-app — sandboxed iframe for the BlackBox creative suite",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "terrain",
+    "splatmap",
+    "painting",
+    "poqpoq",
+    "blackbox"
+  ],
+  "author": "Allen Partridge (p0qp0q)",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}

@@ -1,0 +1,319 @@
+/*
+ * poqpoq SplatPainter — Stealth UI Theme
+ * Orange wireframe aesthetic (#FF6B35)
+ * Progressive disclosure, auto-hide, transparent panels
+ */
+
+:root {
+  /* poqpoq orange palette */
+  --accent: #FF6B35;
+  --accent-glow: #FF8C42;
+  --accent-pulse-end: #FFA652;
+  --accent-dim: rgba(255, 107, 53, 0.3);
+
+  /* stealth UI backgrounds */
+  --panel-bg: rgba(12, 12, 14, 0.85);
+  --panel-hover: rgba(255, 107, 53, 0.08);
+  --panel-border: rgba(255, 107, 53, 0.15);
+
+  /* text */
+  --text-primary: rgba(255, 255, 255, 0.9);
+  --text-secondary: rgba(255, 255, 255, 0.5);
+  --text-dim: rgba(255, 255, 255, 0.25);
+
+  /* canvas */
+  --canvas-bg: #1a1a1e;
+  --grid-line: rgba(255, 255, 255, 0.04);
+
+  /* timing */
+  --fade-in: 200ms;
+  --fade-out: 600ms;
+  --auto-hide-delay: 4s;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--canvas-bg);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--text-primary);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ─── Paint Canvas ─────────────────────────────────────── */
+
+#paint-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  image-rendering: pixelated;
+}
+
+/* ─── Toolbar — left edge, auto-hide ──────────────────── */
+
+#toolbar {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--panel-bg);
+  border-right: 1px solid var(--panel-border);
+  border-radius: 0 8px 8px 0;
+  opacity: 0.15;
+  transition: opacity var(--fade-in) ease;
+  z-index: 10;
+}
+
+#toolbar:hover,
+#toolbar.active {
+  opacity: 1;
+  transition: opacity var(--fade-in) ease;
+}
+
+.tool-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 18px;
+  transition: all 150ms;
+}
+
+.tool-btn:hover {
+  background: var(--panel-hover);
+  color: var(--text-primary);
+  border-color: var(--panel-border);
+}
+
+.tool-btn.selected {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(255, 107, 53, 0.2);
+}
+
+.tool-separator {
+  width: 24px;
+  height: 1px;
+  background: var(--panel-border);
+  margin: 4px auto;
+}
+
+/* ─── Texture Palette — bottom edge, auto-hide ─────────── */
+
+#palette {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--panel-bg);
+  border-top: 1px solid var(--panel-border);
+  border-radius: 8px 8px 0 0;
+  opacity: 0.15;
+  transition: opacity var(--fade-in) ease;
+  z-index: 10;
+  max-width: 90%;
+  overflow-x: auto;
+}
+
+#palette:hover,
+#palette.active {
+  opacity: 1;
+}
+
+.palette-swatch {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 150ms;
+  background-size: cover;
+  background-position: center;
+}
+
+.palette-swatch:hover {
+  border-color: var(--text-secondary);
+  transform: scale(1.1);
+}
+
+.palette-swatch.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(255, 107, 53, 0.4);
+}
+
+.palette-swatch .swatch-label {
+  display: none;
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 6px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.palette-swatch:hover .swatch-label {
+  display: block;
+}
+
+/* ─── Brush Settings — top-right, auto-hide ────────────── */
+
+#brush-settings {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 10px 14px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  opacity: 0.15;
+  transition: opacity var(--fade-in) ease;
+  z-index: 10;
+  min-width: 160px;
+}
+
+#brush-settings:hover,
+#brush-settings.active {
+  opacity: 1;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.setting-row:last-child {
+  margin-bottom: 0;
+}
+
+.setting-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.setting-value {
+  font-size: 11px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 80px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  background: var(--accent);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(255, 107, 53, 0.4);
+}
+
+/* ─── Status Bar — top-left, always subtle ────────────── */
+
+#status {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0;
+  transition: opacity var(--fade-in) ease;
+  z-index: 10;
+  pointer-events: none;
+}
+
+#status.visible {
+  opacity: 1;
+}
+
+/* ─── Brush Cursor Overlay ─────────────────────────────── */
+
+#brush-cursor {
+  position: absolute;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0.6;
+  z-index: 5;
+  box-shadow: 0 0 4px rgba(255, 107, 53, 0.2);
+  transition: width 100ms, height 100ms;
+}
+
+/* ─── Keyboard hint ────────────────────────────────────── */
+
+#keyboard-hint {
+  position: absolute;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0;
+  transition: opacity 1s ease;
+  z-index: 1;
+  pointer-events: none;
+}
+
+#keyboard-hint.visible {
+  opacity: 0.6;
+}
+
+/* ─── Animations ───────────────────────────────────────── */
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 4px rgba(255, 107, 53, 0.2); }
+  50% { box-shadow: 0 0 12px rgba(255, 107, 53, 0.5); }
+}
