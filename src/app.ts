@@ -79,6 +79,7 @@ export class SplatPainterApp {
       { Splatmap },
       { UndoStack },
       { BrushEngine },
+      { TextureAtlas },
       { Toolbar },
       { Palette },
       { SettingsPanel },
@@ -87,6 +88,7 @@ export class SplatPainterApp {
       import('./painting/splatmap.js'),
       import('./painting/undo.js'),
       import('./painting/brush.js'),
+      import('./painting/textures.js'),
       import('./ui/toolbar.js'),
       import('./ui/palette.js'),
       import('./ui/settings.js'),
@@ -141,6 +143,16 @@ export class SplatPainterApp {
     });
 
     this.canvas = new PaintCanvas(this.engine);
+
+    // Load terrain textures for material-blended preview
+    const atlas = new TextureAtlas(msg.textureCatalog, resolution, resolution);
+    atlas.ready.then(() => {
+      console.log('[SplatPainter] Atlas ready, layers:', atlas.layers.length);
+      this.canvas!.setAtlas(atlas);
+      this.showStatus('Textures loaded', 800);
+    }).catch((err) => {
+      console.error('[SplatPainter] Atlas failed:', err);
+    });
 
     // Flash UI visible briefly so the maker knows it exists
     this.toolbar.flash();

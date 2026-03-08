@@ -1,11 +1,12 @@
 /**
  * PaintCanvas — the main drawing surface.
- * Renders the splatmap onto a 2D canvas with per-channel color preview.
+ * Renders splatmap as blended terrain textures (like Substance Painter).
  * Handles pointer events → BrushEngine.
  */
 
 import { BrushEngine } from '../painting/brush.js';
 import type { Splatmap } from '../painting/splatmap.js';
+import type { TextureAtlas } from '../painting/textures.js';
 
 export class PaintCanvas {
   private canvas: HTMLCanvasElement;
@@ -13,10 +14,11 @@ export class PaintCanvas {
   private brushCursor: HTMLElement;
   private engine: BrushEngine;
   private splatmap: Splatmap;
+  private atlas: TextureAtlas | null = null;
   private rafId = 0;
   private needsRedraw = true;
 
-  // Channel preview colors (vibrant, visible on dark background)
+  // Fallback channel colors (used only if atlas not ready)
   private channelColors: [number, number, number][] = [
     [220, 80, 60],    // R — warm red
     [80, 180, 80],    // G — forest green
@@ -36,6 +38,14 @@ export class PaintCanvas {
 
     this.bindPointerEvents();
     this.startRenderLoop();
+  }
+
+  /** Set the texture atlas for material-blended rendering */
+  setAtlas(atlas: TextureAtlas): void {
+    console.log('[PaintCanvas] setAtlas called, layers:', atlas.layers.length,
+      'layer0 size:', atlas.layers[0]?.data.length);
+    this.atlas = atlas;
+    this.needsRedraw = true;
   }
 
   private resize(): void {
@@ -92,7 +102,6 @@ export class PaintCanvas {
   private updateBrushCursor(e: PointerEvent): void {
     const rect = this.canvas.getBoundingClientRect();
     const radius = this.engine.currentSettings.radius;
-    // Scale radius from splatmap space to screen space
     const screenRadius = (radius / this.splatmap.width) * rect.width;
     const size = screenRadius * 2;
 
@@ -116,40 +125,33 @@ export class PaintCanvas {
   private draw(): void {
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
-    const data = this.splatmap.data;
+    const splatData = this.splatmap.data;
     const sw = this.splatmap.width;
     const sh = this.splatmap.height;
 
-    // Create a display image — composite channel colors
     const img = this.ctx.createImageData(sw, sh);
     const out = img.data;
+
+    const hasAtlas = !!(this.atlas && this.atlas.layers.length > 0);
 
     for (let i = 0; i < sw * sh; i++) {
       const si = i * 4;
       const di = i * 4;
 
-      // Blend channel colors by weight
-      let r = 30, g = 30, b = 34; // base: canvas bg color
+      // Sum channel weights
       let totalWeight = 0;
-
-      for (let c = 0; c < 4; c++) {
-        const weight = data[si + c] / 255;
-        if (weight > 0) {
-          const [cr, cg, cb] = this.channelColors[c];
-          r += cr * weight;
-          g += cg * weight;
-          b += cb * weight;
-          totalWeight += weight;
-        }
-      }
+      for (let c = 0; c < 4; c++) totalWeight += splatData[si + c];
 
       if (totalWeight > 0) {
-        out[di]     = Math.min(255, Math.round(r));
-        out[di + 1] = Math.min(255, Math.round(g));
-        out[di + 2] = Math.min(255, Math.round(b));
-        out[di + 3] = 255;
+        if (hasAtlas) {
+          // Texture-blended rendering — sample each layer by weight
+          this.blendTextures(out, di, splatData, si, i, totalWeight);
+        } else {
+          // Fallback: flat color blending
+          this.blendColors(out, di, splatData, si);
+        }
       } else {
-        // Transparent — show grid pattern
+        // Unpainted — subtle checkerboard
         const gx = (i % sw) >> 3;
         const gy = Math.floor(i / sw) >> 3;
         const checker = (gx + gy) & 1;
@@ -168,6 +170,56 @@ export class PaintCanvas {
 
     this.ctx.imageSmoothingEnabled = false;
     this.ctx.drawImage(tempCanvas, 0, 0, w, h);
+  }
+
+  /** Blend terrain textures by splatmap weight at pixel index */
+  private blendTextures(
+    out: Uint8ClampedArray, di: number,
+    splatData: Uint8ClampedArray, si: number,
+    pixelIndex: number, totalWeight: number,
+  ): void {
+    let r = 0, g = 0, b = 0;
+    const layers = this.atlas!.layers;
+    const invTotal = 1 / totalWeight;
+
+    for (let c = 0; c < Math.min(4, layers.length); c++) {
+      const weight = splatData[si + c];
+      if (weight === 0) continue;
+
+      const norm = weight * invTotal;
+      const texData = layers[c].data;
+      const ti = pixelIndex * 4;
+
+      r += texData[ti]     * norm;
+      g += texData[ti + 1] * norm;
+      b += texData[ti + 2] * norm;
+    }
+
+    out[di]     = Math.min(255, Math.round(r));
+    out[di + 1] = Math.min(255, Math.round(g));
+    out[di + 2] = Math.min(255, Math.round(b));
+    out[di + 3] = 255;
+  }
+
+  /** Fallback: blend flat channel colors */
+  private blendColors(
+    out: Uint8ClampedArray, di: number,
+    splatData: Uint8ClampedArray, si: number,
+  ): void {
+    let r = 30, g = 30, b = 34;
+    for (let c = 0; c < 4; c++) {
+      const weight = splatData[si + c] / 255;
+      if (weight > 0) {
+        const [cr, cg, cb] = this.channelColors[c];
+        r += cr * weight;
+        g += cg * weight;
+        b += cb * weight;
+      }
+    }
+    out[di]     = Math.min(255, Math.round(r));
+    out[di + 1] = Math.min(255, Math.round(g));
+    out[di + 2] = Math.min(255, Math.round(b));
+    out[di + 3] = 255;
   }
 
   requestRedraw(): void {
