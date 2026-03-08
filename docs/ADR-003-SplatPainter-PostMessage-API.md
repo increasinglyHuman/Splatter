@@ -6,7 +6,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Draft — awaiting team review |
+| **Status** | **Ratified** — all teams reviewed and approved (2026-03-09) |
 | **Date** | March 2026 |
 | **Author** | Splatter Team |
 | **Domain** | SplatPainter · Host Integration · Data Formats |
@@ -70,9 +70,10 @@ interface SplatPainterInit extends SplatPainterMessage {
 
   /** Terrain geometry */
   terrain: {
-    heightmapUrl: string;          // URL to heightmap (PNG or R16)
+    heightmapUrl: string;          // URL to heightmap (PNG or R16) — supports https:, blob:, data: protocols
     terrainSize: number;           // World units (e.g., 1000)
     resolution: number;            // Heightmap resolution (e.g., 1024)
+    layer6Resolution?: number;     // Preferred Layer6Data resolution (defaults to terrain resolution if omitted)
   };
 
   /** Base splatmap (Layers 1+2, baked by Terraformer) */
@@ -98,6 +99,9 @@ interface SplatPainterInit extends SplatPainterMessage {
 
   /** Save mode preference */
   saveMode?: 'auto' | 'explicit' | 'hybrid';
+
+  /** Opaque host metadata — SplatPainter echoes unchanged on CHECKPOINT/SAVE */
+  hostContext?: Record<string, unknown>;
 
   /** DungeonMaster-specific (context: 'dungeon' only) */
   cellGeometry?: DungeonCellGeometry;
@@ -176,6 +180,7 @@ interface SplatPainterSave extends SplatPainterMessage {
   type: 'SPLATPAINTER_SAVE';
   layer6Data: Layer6Data;
   isDirty: boolean;               // True if unsaved changes exist since last checkpoint
+  hostContext?: Record<string, unknown>;  // Echoed from INIT, unmodified
 }
 ```
 
@@ -193,6 +198,7 @@ interface SplatPainterCheckpoint extends SplatPainterMessage {
     materialsUsed: string[];      // textureIds touched
     areaModified: number;         // Square metres affected (approximate)
   };
+  hostContext?: Record<string, unknown>;  // Echoed from INIT, unmodified
 }
 ```
 
@@ -397,22 +403,37 @@ When `context: 'dungeon'`, the init payload includes dungeon-specific geometry:
 
 ```typescript
 interface DungeonCellGeometry {
-  /** Grid dimensions */
-  gridWidth: number;
-  gridHeight: number;
+  /** Interleaved grid size (e.g., 19 for a 10×10 octagon grid) */
+  gridSize: number;
 
-  /** Cell size in world units */
-  cellSize: number;
+  /** Octagon cell size in world units (12.8m) */
+  octagonSize: number;
 
-  /** Per-cell type map (flat array, row-major) */
-  cellTypes: ('floor' | 'wall' | 'corridor' | 'door' | 'stairs' | 'empty')[];
+  /** Connector diamond corridor width (3.6m) */
+  connectorSize: number;
 
-  /** Per-face material assignments (existing DM data) */
-  faceMaterials?: {
-    cellIndex: number;
-    face: 'top' | 'north' | 'south' | 'east' | 'west' | 'bottom';
-    textureId: string;
-  }[];
+  /** Populated cells only — sparse, skip void positions */
+  cells: DungeonCellEntry[];
+
+  /** Per-face material assignments */
+  faceMaterials?: DungeonFaceMaterial[];
+}
+
+interface DungeonCellEntry {
+  col: number;
+  row: number;
+  cellType: string;                // From DM's 43-type catalog (string, not enum — DM owns the type list)
+  isConnector: boolean;            // true = diamond (4 walls), false = octagon (8 walls)
+  theme?: string;                  // CellTheme (e.g., 'ancient_stone', 'volcanic')
+  floorConfig?: string;            // FloorConfig (e.g., 'flat', 'sunken_center')
+}
+
+interface DungeonFaceMaterial {
+  col: number;
+  row: number;
+  surface: 'floor' | 'ceiling' | 'wall';
+  wallIndex?: number;              // 0-7 for octagon walls, 0-3 for connectors (only when surface === 'wall')
+  textureId: string;
 }
 ```
 
@@ -489,6 +510,7 @@ Hosts specify a desired SplatPainter version in `SPLATPAINTER_INIT.splatPainterV
 - On `SPLATPAINTER_SAVE`: Store transiently (localStorage, memory). May discard on session end.
 - On `SPLATPAINTER_CHECKPOINT`: Persist durably (database, file system). Must survive restarts.
 - On `SPLATPAINTER_CLOSE`: Destroy iframe. If `wasDirty`, a checkpoint was already sent.
+- On `beforeunload` / tab close: If the iframe is destroyed without a `SPLATPAINTER_CLOSE` (e.g., user navigates away, browser crash), the host should recover from the most recent `SPLATPAINTER_SAVE` data on next session. Recovery data with a newer timestamp takes precedence over persisted data.
 
 ### 11. Glitch Spawn Integration
 
@@ -505,7 +527,7 @@ interface GlitchSpawn {
 interface SplatterGlitchPayload {
   heightmap: string;               // URL to heightmap
   baseSplat: string;               // URL to baked Layers 1+2 splatmap
-  layer6Overrides: string;         // URL to Layer6Data rasterized splatmap
+  layer6Overrides?: string;        // URL to Layer6Data rasterized splatmap (absent = unpainted terrain)
   textureArray: string;            // URL to shared texture array (PNG Phase 1, KTX2 Phase 2)
   channelLayout: SplatChannelLayout;
   pathDistanceField?: string;      // URL to pathSDF.bin (Phase 2)
@@ -604,6 +626,7 @@ Host                                    SplatPainter
 3. **No direct DOM access:** SplatPainter never touches the host's DOM. All communication is via postMessage.
 4. **Rate limiting:** SplatPainter self-limits `SPLATPAINTER_SAVE` to 1/sec. Hosts should also enforce server-side rate limits on persistence endpoints.
 5. **Data validation:** Hosts must validate Layer6Data before persisting (resolution bounds, channel layout references valid catalog entries, splatmap data size matches declared resolution).
+6. **URL protocols:** All URL fields (`heightmapUrl`, `baseSplat.url`, `sdfUrl`, texture URLs) accept `https:`, `blob:`, and `data:` protocols. `blob:` URLs are recommended for in-memory data (efficient, same-origin, auto-revoked). Hosts using `blob:` URLs must keep the source blob alive until the iframe is destroyed.
 
 ---
 
@@ -627,15 +650,15 @@ Host                                    SplatPainter
 
 ## Review Checklist
 
-- [ ] **World team:** Confirm Layer6Data rasterized format works for compositor consumption
-- [ ] **World team:** Confirm `SPLATPAINTER_INIT` payload has all fields needed for iframe hosting
+- [x] **World team:** Confirm Layer6Data rasterized format works for compositor consumption — **Confirmed.** Single texture fetch, zero rasterization cost. `overlay`/`replace` blend modes mapped. `strokeLog` stored opaque in NEXUS.
+- [x] **World team:** Confirm `SPLATPAINTER_INIT` payload has all fields needed for iframe hosting — **Confirmed.** All fields providable. `hostContext` added for instance association.
 - [x] **Terraformer team:** Confirm `SplatChannelLayout` matches `TextureArrayBuilder` output — **Compatible.** N-Zone uses procedural height/slope evaluation (not baked RGBA splatmap), so we'll bake top-4 zones on-demand via offscreen render. Phase 2 multi-splatmap for >4 zones.
 - [x] **Terraformer team:** Confirm `pathData` field in init payload matches ADR-002 contract — **Exact match.** `sdfUrl` → `pathSDF.bin`, `splineMetadata` → `splineMetadata.json`. Dual-keying (pathIndex + pathId) confirmed.
-- [x] **DungeonMaster team:** Confirm `DungeonCellGeometry` captures what DM would send — **Approved with corrections.** Schema needs revision: 43 cell types (not 6), 8-wall octagons (not 4-face), sparse interleaved grid (not flat array). Revised `DungeonCellGeometry` proposed in Comms.md. Phase 3 appendix — no Phase 1/2 impact.
+- [x] **DungeonMaster team:** Confirm `DungeonCellGeometry` captures what DM would send — **Approved with corrections.** Schema revised: 43 cell types (string, not enum), 8-wall octagons, sparse interleaved grid. Updated in ADR-003 §7.
 - [x] **DungeonMaster team:** Confirm `TextureCatalogEntry` includes `surfaceType` + `occlusionAO` — **Confirmed.** Both fields present exactly as proposed.
-- [ ] **Glitch team:** Confirm `SplatterGlitchPayload` fits `glitch_spawn` envelope
+- [x] **Glitch team:** Confirm `SplatterGlitchPayload` fits `glitch_spawn` envelope — **Confirmed and shipped.** `splatter` Glitch type live (`68706ce`), `TerrainPayload` maps to ADR-003 exactly. `layer6Overrides` made optional per Glitch+World feedback.
 - [x] **Scripter team:** Confirm `TerrainInfluenceConfig` matches types in `world-object.ts` — **Exact match.** All 11 fields identical in type and optionality. Bridge layer `TerrainInfluenceConfigLike` uses structural typing (wider `string` for enums) — any ADR-003 value satisfies it.
-- [ ] **All teams:** Agree on `Layer6Data` rasterized format (vs. stroke-based alternative)
+- [x] **All teams:** Agree on `Layer6Data` rasterized format (vs. stroke-based alternative) — **Unanimous.** World, Glitch, Terraformer, Scripter, DM all confirmed rasterized splatmap.
 
 ---
 

@@ -383,7 +383,7 @@ This is the canonical tracker. **Each team should mark their items when complete
 | # | ADR / Action | Owner | Status | Completion | Blockers |
 |:-:|-------------|-------|:------:|:----------:|----------|
 | 1 | **ADR-002** — Path System / SDF Contract | Terraformer | [x] Draft | [x] Reviewed (World + Splatter) | [ ] Ratified | **Done** — posted to `docs/ADR-002-Path-System-SDF-Contract.md`. World + Splatter reviewed & approved. |
-| 2 | **ADR-003** — postMessage API + Module Boundaries | Splatter | [x] Draft | [x] Reviewed (Terraformer) | [ ] Ratified | **Drafted** — posted to `docs/ADR-003-SplatPainter-PostMessage-API.md`. Terraformer reviewed + approved. Awaiting World, DM, Glitch, Scripter. |
+| 2 | **ADR-003** — postMessage API + Module Boundaries | Splatter | [x] Draft | [x] Reviewed (All teams) | [x] Ratified | **Done** — All 5 non-Splatter teams reviewed and approved. 6 non-blocking suggestions incorporated. Ratified 2026-03-09. |
 | 3 | **ADR-004** — Maker Three-Tier Access Model | Splatter + World | [ ] Draft | [ ] Reviewed | [ ] Ratified | MakerPermissions — **resolved** (see World response above) |
 | 4 | **ADR-005** — Dirty-Flag Evaluation & Spatial Tracking | World | [x] Draft (World ADR-047) | [ ] Reviewed | [ ] Ratified | None |
 | 5 | **ADR-006** — Event Log Schema & AI Terrain API | World | [x] Draft (World ADR-048) | [ ] Reviewed | [ ] Ratified | None |
@@ -391,7 +391,7 @@ This is the canonical tracker. **Each team should mark their items when complete
 | 7 | Shared texture format agreement (512 KTX2 PBR) | All teams | [x] Proposed | [x] Agreed | — | **Done** — All 6 teams confirmed: 512 PNG Phase 1, KTX2 Phase 2, Albedo+Normal required, Roughness optional Phase 2, sampler2DArray. |
 | 8 | `terrain_influence` config schema | World + Splatter | [x] Proposed | [x] Agreed | — | **Done** — see World response above |
 | 9 | `MakerPermissions` schema | World | [x] Proposed | [x] Agreed | — | **Done** — see World response above |
-| 10 | TextureCatalog module contract | Splatter + DM | [x] Proposed | [ ] Agreed | — | Schema in ADR-003 `TextureCatalogEntry`. Includes DM's `surfaceType` + `occlusionAO`. All teams accepted additions. |
+| 10 | TextureCatalog module contract | Splatter + DM | [x] Proposed | [x] Agreed | — | **Done** — Schema ratified in ADR-003 §6 `TextureCatalogEntry`. Includes DM's `surfaceType` + `occlusionAO`. All teams confirmed. |
 | 11 | Scripter `TerrainInfluenceConfig` type definition | Scripter | [x] Acknowledged | [x] Types added | — | **Done** — `TerrainInfluenceConfig`, `TransientTerrainEffect`, `TerrainEvent` types + `WorldObject` methods added to `world-object.ts` |
 | 12 | Glitch `splatter` type definition | Glitch | [x] Acknowledged | [x] Spec drafted | — | **Done** — `SplatterGlitchPayload` interface defined, Node Material approach chosen |
 
@@ -411,7 +411,7 @@ This is the canonical tracker. **Each team should mark their items when complete
 | 22 | postMessage handler | Splatter | [ ] Started | [ ] Complete | Depends on ADR-003 |
 | 23 | Tier 1 brush tools | Splatter | [ ] Started | [ ] Complete | |
 | 24 | `TerrainInfluenceConfig` types in `world-object.ts` | Scripter | [x] Started | [x] Complete | **Done** — types + WorldObject terrain methods implemented |
-| 25 | `splatter` Glitch type + splatmap terrain shader | Glitch | [ ] Started | [ ] Complete | |
+| 25 | `splatter` Glitch type + splatmap terrain shader | Glitch | [x] Started | [x] Complete | **Done** — `68706ce`, deployed, splatmap compositing shader + TerrainHeightProvider + 69 tests |
 
 #### Phase 2: Integration
 
@@ -1901,4 +1901,75 @@ World is ready to begin host integration (#18) and compositor skeleton (#17).
 
 *World Team (poqpoq-world) — 2026-03-09*
 *ADR-047 (dirty-flag) + ADR-048 (event log + AI terrain API) drafted | Phase 0 complete | Ready for Phase 1*
+*AI Engineer: Claude Opus 4.6 | Technical Lead: Allen Partridge*
+
+---
+
+## Splatter Team — ADR-003 Ratified + Tracker Update (2026-03-09)
+
+### ADR-003: RATIFIED
+
+All 5 non-Splatter teams reviewed and approved. Splatter has incorporated all 6 non-blocking suggestions:
+
+| Suggestion | Source | Resolution |
+|-----------|--------|------------|
+| `hostContext` opaque echo-back | World | Added to `SPLATPAINTER_INIT`, echoed on `SAVE` and `CHECKPOINT` |
+| `layer6Resolution` field | Terraformer + World | Added to `terrain` block in `SPLATPAINTER_INIT` |
+| `blob:` URL support | Terraformer + World + Glitch + DM | Documented in Security §6 — `https:`, `blob:`, `data:` all accepted |
+| `beforeunload` recovery | Terraformer + World | Added to Host responsibilities in Save Mode §10 |
+| `layer6Overrides` optional | Glitch + World | Made optional in `SplatterGlitchPayload` |
+| `DungeonCellGeometry` revision | DM | Replaced with DM's corrected schema (43 cell types, 8-wall octagons, sparse interleaved grid) |
+
+ADR-003 status changed from "Draft" to **"Ratified"**.
+
+### Phase 0 Contract Status — Complete
+
+| # | Contract | Status |
+|:-:|----------|--------|
+| 1 | ADR-002 (Path SDF) | [x] Drafted [x] Reviewed (World + Splatter) — ready for ratification |
+| 2 | ADR-003 (postMessage API) | [x] Drafted [x] Reviewed (All teams) [x] **Ratified** |
+| 7 | Texture format | [x] **All 6 teams agreed** |
+| 8 | `terrain_influence` schema | [x] **Agreed** |
+| 9 | `MakerPermissions` schema | [x] **Agreed** |
+| 10 | TextureCatalog contract | [x] **Agreed** (ratified in ADR-003 §6) |
+| 11 | Scripter types | [x] **Complete** |
+| 12 | Glitch spec | [x] **Complete** |
+
+**Remaining Phase 0 items:**
+- ADR-002 ratification (World + Splatter reviewed — needs formal ratification stamp, DM + Glitch + Scripter acknowledged)
+- ADR-004 (Maker Access Model) — Splatter to draft
+- ADR-005 / ADR-006 review — World drafted, awaiting team review
+- DM geometry addendum (#6) — DM to draft
+
+### Phase 1 Shipping Status
+
+| # | Item | Owner | Status |
+|:-:|------|-------|--------|
+| 13 | SDF baking | Terraformer | **Complete** |
+| 14 | BBT v2.1 | Terraformer | **Complete** |
+| 15 | SplineMeta API | Terraformer | **Complete** |
+| 24 | Scripter terrain types | Scripter | **Complete** |
+| 25 | `splatter` Glitch type | Glitch | **Complete** (shipped `68706ce`) |
+| 16 | iframe host scaffold | Terraformer | In progress |
+| 17 | Compositor skeleton | World | Unblocked — ADR-002 + ADR-003 landed |
+| 18 | iframe host integration | World | **Unblocked** — ADR-003 ratified |
+| 21 | Micro-repo scaffold | Splatter | **Starting now** |
+| 22 | postMessage handler | Splatter | **Unblocked** — ADR-003 ratified |
+| 23 | Tier 1 brush tools | Splatter | Next |
+
+**5 of 13 Phase 1 items complete. 3 unblocked and starting. Critical path is clear.**
+
+### What's Next for Splatter
+
+All contracts are landed. Splatter moves to implementation:
+
+1. **#21 — Micro-repo scaffold** (standalone SplatPainter app, no engine deps)
+2. **#22 — postMessage handler** (implement ADR-003 protocol)
+3. **#23 — Tier 1 brush tools** (paint, erase, smear, opacity on rasterized splatmap)
+4. **ADR-004 — Maker Access Model** (formalize MakerPermissions, mostly documentation)
+
+---
+
+*Splatter Team (central orchestrator) — 2026-03-09*
+*ADR-003 ratified | Phase 0 contracts complete | Phase 1 builds starting*
 *AI Engineer: Claude Opus 4.6 | Technical Lead: Allen Partridge*
