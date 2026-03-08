@@ -36,16 +36,18 @@ export class TextureAtlas {
   private async loadOrGenerate(
     entry: TextureCatalogEntry, w: number, h: number,
   ): Promise<TextureLayer> {
-    // Try loading real texture first
-    if (entry.previewUrl) {
+    // fullUrl = full-resolution PBR asset — always prefer this when available.
+    // previewUrl = thumbnail, often low-res — only use if fullUrl absent.
+    const imageUrl = entry.fullUrl || entry.previewUrl || '';
+    if (imageUrl) {
       try {
-        return await this.loadFromUrl(entry.previewUrl, w, h);
+        return await this.loadFromUrl(imageUrl, w, h);
       } catch {
-        // Fall through to procedural
+        // Network failure or CORS — fall through to procedural silently
       }
     }
 
-    // Generate procedural texture from previewColor
+    // Generate procedural texture from previewColor + material type
     const baseColor = this.parseColor(entry.previewColor ?? '#808080');
     return this.generateMaterial(baseColor, entry.material, w, h);
   }
@@ -100,11 +102,12 @@ export class TextureAtlas {
     base: [number, number, number], material: string, w: number, h: number,
   ): TextureLayer {
     switch (material) {
-      case 'grass': return this.genGrass(base, w, h);
-      case 'dirt':  return this.genDirt(base, w, h);
-      case 'rock':  return this.genRock(base, w, h);
-      case 'sand':  return this.genSand(base, w, h);
-      default:      return this.genGeneric(base, w, h);
+      case 'grass':       return this.genGrass(base, w, h);
+      case 'dirt':        return this.genDirt(base, w, h);
+      case 'rock':        return this.genRock(base, w, h);
+      case 'sand':        return this.genSand(base, w, h);
+      case 'cobblestone': return this.genCobblestone(base, w, h);
+      default:            return this.genGeneric(base, w, h);
     }
   }
 
@@ -247,6 +250,103 @@ export class TextureAtlas {
     }
 
     return { data: out, width: w, height: h };
+  }
+
+  /**
+   * Cobblestone: voronoi cells = individual stones, boundaries = mortar gaps.
+   *
+   * The key insight vs genRock: in rock, voronoi boundaries are CRACKS (dark lines
+   * in a continuous surface). In cobblestone, voronoi boundaries are MORTAR (dark
+   * recessed gaps between discrete raised stones). Each cell gets its own color
+   * variation so individual stones read as separate objects.
+   *
+   * Three layers:
+   *   1. Cell ID  → per-stone color tint (makes each stone distinct)
+   *   2. Cell dist → mortar gap darkening at boundaries + bevel highlight near center
+   *   3. Surface fbm → micro-texture on each stone face
+   */
+  private genCobblestone(base: [number, number, number], w: number, h: number): TextureLayer {
+    const out = new Uint8ClampedArray(w * h * 4);
+    const [br, bg, bb] = base;
+
+    // Stone density — higher = more, smaller stones. 6–8 reads well at 256px.
+    const density = 7;
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const di = (y * w + x) * 4;
+        const nx = x / w;
+        const ny = y / h;
+
+        // Light warp keeps stones irregular without destroying the cell structure.
+        // Heavy warp (like rock) would smear the mortar lines into mush.
+        const [wx, wy] = this.warp(nx, ny, 2, 0.15);
+        const vx = wx * density;
+        const vy = wy * density;
+
+        // Voronoi: find nearest cell center AND second-nearest (for mortar width)
+        const { dist: d1, cellX, cellY } = this.voronoiCell(vx, vy);
+
+        // Mortar gap: sharp darkening within ~12% of cell boundary
+        // smoothstep gives a rounded bevel instead of a hard edge
+        const mortarWidth = 0.13;
+        const bevelWidth  = 0.22;
+        const mortar = d1 < mortarWidth
+          ? d1 / mortarWidth                                        // deep gap → nearly black
+          : d1 < bevelWidth
+            ? 1.0 + (d1 - mortarWidth) / (bevelWidth - mortarWidth) * 0.18  // bevel highlight
+            : 1.0;                                                  // stone face
+
+        // Per-stone color variation from cell hash — each stone is subtly different.
+        // Range kept tight (±12%) so it reads as one material, not a mosaic.
+        const stoneVar = this.hash(cellX, cellY) * 0.12;           // [-0.12, +0.12]
+
+        // Surface micro-texture within the stone face
+        const surface = this.fbm(nx * 14 + cellX, ny * 14 + cellY, 3) * 0.08;
+
+        // Slight warm/cool shift per stone: warm stones push red, cool push blue
+        const warmth = this.hash(cellX + 53, cellY + 79) * 0.06;  // [-0.06, +0.06]
+
+        const bright = (0.88 + stoneVar + surface) * mortar;
+
+        out[di]     = this.clamp((br + warmth * 20) * bright);
+        out[di + 1] = this.clamp(bg * bright);
+        out[di + 2] = this.clamp((bb - warmth * 15) * bright);
+        out[di + 3] = 255;
+      }
+    }
+
+    return { data: out, width: w, height: h };
+  }
+
+  /**
+   * Voronoi returning both distance AND the integer cell coordinates of the
+   * nearest cell center — needed so each stone can have a stable, unique hash.
+   */
+  private voronoiCell(x: number, y: number): { dist: number; cellX: number; cellY: number } {
+    const ix = Math.floor(x);
+    const iy = Math.floor(y);
+    let minDist = 4;
+    let nearCX = ix;
+    let nearCY = iy;
+
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const cx = ix + dx;
+        const cy = iy + dy;
+        // Cell jitter: hash gives each cell center a unique offset within [0,1]
+        const px = cx + (this.hash(cx, cy) * 0.5 + 0.5);
+        const py = cy + (this.hash(cx + 97, cy + 131) * 0.5 + 0.5);
+        const dist = Math.sqrt((x - px) * (x - px) + (y - py) * (y - py));
+        if (dist < minDist) {
+          minDist = dist;
+          nearCX = cx;
+          nearCY = cy;
+        }
+      }
+    }
+
+    return { dist: minDist, cellX: nearCX, cellY: nearCY };
   }
 
   /** Generic material: warped multi-octave noise */
