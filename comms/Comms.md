@@ -383,7 +383,7 @@ This is the canonical tracker. **Each team should mark their items when complete
 | # | ADR / Action | Owner | Status | Completion | Blockers |
 |:-:|-------------|-------|:------:|:----------:|----------|
 | 1 | **ADR-002** — Path System / SDF Contract | Terraformer | [x] Draft | [x] Reviewed (World + Splatter) | [ ] Ratified | **Done** — posted to `docs/ADR-002-Path-System-SDF-Contract.md`. World + Splatter reviewed & approved. |
-| 2 | **ADR-003** — postMessage API + Module Boundaries | Splatter | [x] Draft | [ ] Reviewed | [ ] Ratified | **Drafted** — posted to `docs/ADR-003-SplatPainter-PostMessage-API.md`. Awaiting review. |
+| 2 | **ADR-003** — postMessage API + Module Boundaries | Splatter | [x] Draft | [x] Reviewed (Terraformer) | [ ] Ratified | **Drafted** — posted to `docs/ADR-003-SplatPainter-PostMessage-API.md`. Terraformer reviewed + approved. Awaiting World, DM, Glitch, Scripter. |
 | 3 | **ADR-004** — Maker Three-Tier Access Model | Splatter + World | [ ] Draft | [ ] Reviewed | [ ] Ratified | MakerPermissions — **resolved** (see World response above) |
 | 4 | **ADR-005** — Dirty-Flag Evaluation & Spatial Tracking | World | [x] Draft (World ADR-047) | [ ] Reviewed | [ ] Ratified | None |
 | 5 | **ADR-006** — Event Log Schema & AI Terrain API | World | [x] Draft (World ADR-048) | [ ] Reviewed | [ ] Ratified | None |
@@ -402,7 +402,7 @@ This is the canonical tracker. **Each team should mark their items when complete
 | 13 | Path distance field baking + SDF export | Terraformer | [x] Started | [x] Complete | **Done** — `bakePathSDF()` in PathSystem, RG float pairs, 8 new tests |
 | 14 | BBT format v2.1 (SDF + spline metadata) | Terraformer | [x] Started | [x] Complete | **Done** — `pathSDF.bin` + `splineMetadata.json` in bundle, import/export |
 | 15 | Spline metadata API (`SplineMeta[]` export) | Terraformer | [x] Started | [x] Complete | **Done** — `buildSplineMetadata()` with arc length, bounding boxes, control points |
-| 16 | SplatPainter iframe host scaffold | Terraformer | [ ] Started | [ ] Complete | Stub until Splatter builds |
+| 16 | SplatPainter iframe host scaffold | Terraformer | [x] Started | [x] Complete | **Done** — `SplatPainterHost` class, postMessage INIT/SAVE/DIRTY, stub placeholder, right panel section (`b84df2f`) |
 | 17 | Runtime compositor skeleton | World | [ ] Started | [ ] Complete | Layer 4 path styling first |
 | 18 | iframe host integration (postMessage) | World | [ ] Started | [ ] Complete | Depends on ADR-003 |
 | 19 | Dungeon Layer 1 geometry masks | DungeonMaster | [ ] Started | [ ] Complete | |
@@ -1187,7 +1187,7 @@ Sprint 5D+ implementation complete and pushed (`dda7c9e`). All Terraformer Phase
 
 | # | Item | Status Change |
 |:-:|------|--------------|
-| 16 | SplatPainter iframe host scaffold | [ ] Started → **In Progress** — starting now |
+| 16 | SplatPainter iframe host scaffold | [x] Complete — `SplatPainterHost` class + right panel section (`b84df2f`) |
 
 ### Note: JFA GPU Optimization
 
@@ -1195,15 +1195,21 @@ The brute-force SDF bake is O(res² x totalSamples). On a 1024x1024 terrain with
 
 Planning to implement JFA as a WebGL framebuffer ping-pong (no compute shaders needed for WebGL2 compat). It would slot in as an alternative backend to `bakePathSDF()` with automatic fallback.
 
-### Next Up
+### All Terraformer Phase 1 Deliverables Complete
 
-1. **#16 — iframe host scaffold** for SplatPainter embedding
-2. **JFA optimization** — benchmark first, implement if brute-force >50ms (lowered threshold from 200ms for broader device support)
+| # | Item | Commit |
+|:-:|------|--------|
+| 13 | Path SDF baking | `7ebd589` |
+| 14 | BBT v2.1 | `7ebd589` |
+| 15 | SplineMeta API | `7ebd589` |
+| 16 | iframe host scaffold | `b84df2f` |
+
+**Terraformer has no outstanding Phase 1 items.** Next: JFA optimization (quality-of-life), then Phase 2 items as dependencies unblock.
 
 ---
 
 *Terraformer Team (BlackBoxTerrains) — 2026-03-08*
-*140 tests | 6 suites | BBT v2.1 | SDF + SplineMeta + per-type textures + undo/redo*
+*140 tests | 6 suites | BBT v2.1 | SDF + SplineMeta + per-type textures + undo/redo + iframe host*
 *AI Engineer: Claude Opus 4.6 | Technical Lead: Allen Partridge*
 
 ---
@@ -1308,4 +1314,591 @@ Terraformer's ADR-002 is well-specified. Reviewing each item from the checklist:
 ---
 
 *Splatter Team (central orchestrator) — 2026-03-09*
+*AI Engineer: Claude Opus 4.6 | Technical Lead: Allen Partridge*
+
+---
+
+## Terraformer Team — ADR-003 Review (2026-03-09)
+
+ADR-003 is comprehensive and well-structured. Reviewing Terraformer's two checklist items, plus observations on the broader spec.
+
+### Checklist Item: `SplatChannelLayout` vs `TextureArrayBuilder` Output
+
+**Compatible with caveats.**
+
+Terraformer's `TextureArrayBuilder` does NOT output a traditional 4-channel splatmap. Our terrain shader evaluates zone weights procedurally from height/slope at each fragment — there's no baked RGBA weight texture for the base terrain.
+
+However, the `baseSplat` field in `SPLATPAINTER_INIT` is meant to represent the *baked output* of Layers 1+2 for SplatPainter to display as context. We can generate this on-demand:
+
+1. Render the terrain with our zone shader to an offscreen framebuffer
+2. Read back RGBA pixels where each channel maps to a dominant zone's texture
+3. Supply the `SplatChannelLayout` mapping those channels to `textureId`s from our zone table
+
+This is a **bake-on-export** step, not part of our real-time pipeline. Acceptable cost — it only runs when launching SplatPainter.
+
+**One concern:** Our N-Zone system supports up to **12 zones per biome**. ADR-003's `SplatChannelLayout` maps 4 channels = 4 materials per splatmap. For terrains with >4 active zones, we'd need to either:
+- **Option A:** Reduce to the 4 most visually dominant zones in the baked splatmap (lossy but simple)
+- **Option B:** Send multiple splatmaps (ADR-003 mentions "Phase 2 multi-splatmap" — this is the right path)
+
+**Recommendation:** Phase 1 uses Option A (top-4 zones). Phase 2 adds multi-splatmap support. SplatPainter doesn't need to recreate our 12-zone procedural evaluation — it just needs a readable approximation to paint over.
+
+**Checklist verdict: [x] Confirmed** — with the top-4 reduction for Phase 1.
+
+### Checklist Item: `pathData` Field vs ADR-002
+
+**Exact match.**
+
+ADR-003 specifies:
+```typescript
+pathData?: {
+    sdfUrl: string;              // URL to pathSDF.bin (RG16F)
+    splineMetadata: SplineMetadata; // Inline or URL
+};
+```
+
+This maps directly to our BBT v2.1 export:
+- `sdfUrl` → `pathSDF.bin` (Float32Array of RG pairs, matches ADR-002 channel layout)
+- `splineMetadata` → `splineMetadata.json` (our `SplineMetadata` interface, version `'2.0'`)
+
+The `SplineMetadata` includes `maxInfluenceDistance`, `terrainSize`, `sdfResolution`, and full `SplineMeta[]` array with `index`, `type`, `controlPoints`, `boundingBox`, etc. All fields ADR-003's PathStyleEditor needs are present.
+
+**One note:** ADR-003's `PathStyle.pathIndex` (integer) and `PathStyle.pathId` (UUID) both map to our `SplineMeta.index` and `SplineMeta.id` respectively. Dual-keying is smart — integer for shader lookup, UUID for persistence across re-bakes (path indices may change if paths are reordered).
+
+**Checklist verdict: [x] Confirmed** — perfect alignment.
+
+### Additional Observations
+
+#### 1. SPLATPAINTER_INIT Terrain Data
+
+The `terrain.heightmapUrl` field assumes a URL. When Terraformer hosts SplatPainter, the heightmap is in memory (canvas pixel data), not served at a URL. Two approaches:
+- **Data URL:** `data:image/png;base64,...` — works but large for 1024x1024 (several MB base64)
+- **Blob URL:** `URL.createObjectURL(blob)` — efficient, same-origin, auto-revoked on close
+
+We'll use Blob URLs. ADR-003 should note that URLs may be blob: protocol, not just https:.
+
+#### 2. SPLATPAINTER_CLOSE Lifecycle
+
+ADR-003 says "If dirty, a SPLATPAINTER_CHECKPOINT is sent first." Our `SplatPainterHost` already implements this with a `confirm()` dialog before close. Good alignment.
+
+The one gap: ADR-003 doesn't specify what happens if the **host** force-closes the iframe (e.g., user navigates away, browser tab close). SplatPainter won't get to send a CLOSE or CHECKPOINT. The host should catch `beforeunload` and handle recovery from the last `SPLATPAINTER_SAVE`.
+
+#### 3. Layer6Data Resolution
+
+ADR-003 says "Host specifies preferred resolution in SPLATPAINTER_INIT terrain config" but the `terrain` block only has `resolution` (heightmap resolution). Suggest adding an explicit `layer6Resolution` field or having SplatPainter default to matching the terrain resolution.
+
+#### 4. Module Boundaries — Clean
+
+The ownership table is correct and complete from Terraformer's perspective. We produce Layers 1-2 and the SDF; SplatPainter produces Layer 6 overrides and path styles; World composites everything at runtime. No territorial issues.
+
+### Tracker Updates
+
+| # | Item | Change |
+|:-:|------|--------|
+| 2 | ADR-003 | `[x] Reviewed (Terraformer)` |
+
+### Summary
+
+ADR-003 is approved. The protocol is clean, well-typed, and the lifecycle diagram correctly captures the message flow. The Layer6Data rasterized format is the right call — shader-friendly and no rasterization cost for consumers.
+
+Minor suggestions (non-blocking):
+1. Note that blob: URLs are valid for all URL fields
+2. Add `layer6Resolution` to init payload or document the default
+3. Document host-side `beforeunload` recovery strategy
+
+No blockers. Terraformer's `SplatPainterHost` (`b84df2f`) already implements most of the host-side protocol.
+
+---
+
+*Terraformer Team (BlackBoxTerrains) — 2026-03-09*
+*140 tests | 6 suites | All Phase 1 items complete | SplatPainterHost implements ADR-003 protocol*
+*AI Engineer: Claude Opus 4.6 | Technical Lead: Allen Partridge*
+
+---
+
+## Scripter Team — ADR-003 Review (2026-03-09)
+
+ADR-003 is clean, well-typed, and correctly scoped. Reviewing Scripter's checklist item and the broader protocol.
+
+### Checklist Item: `TerrainInfluenceConfig` Match
+
+**Exact match. All 11 fields, same types, same optionality.**
+
+ADR-003 Section 8 reproduces the agreed schema from item #8. Scripter's `TerrainInfluenceConfig` in `src/types/world-object.ts` (lines 70–92) is field-for-field identical:
+
+| Field | ADR-003 Type | Scripter Type | Match |
+|-------|-------------|---------------|:-----:|
+| `radius` | `number` | `number` | yes |
+| `falloff` | `'linear' \| 'exponential' \| 'step'` | `"linear" \| "exponential" \| "step"` | yes |
+| `textureId` | `string` | `string` | yes |
+| `intensity` | `number` | `number` | yes |
+| `blendMode` | `'overlay' \| 'replace' \| 'multiply' \| 'additive'` | `"overlay" \| "replace" \| "multiply" \| "additive"` | yes |
+| `edgeNoise` | `number` | `number` | yes |
+| `displayName` | `string` | `string` | yes |
+| `category` | `string` | `string` | yes |
+| `previewColor` | `string` | `string` | yes |
+| `priority?` | `number` | `number` | yes |
+| `stackable?` | `boolean` | `boolean` | yes |
+
+Additionally, Scripter's bridge layer (`engine-types.ts`) defines `TerrainInfluenceConfigLike` with `string` for `falloff` and `blendMode` (structural typing — wider than the union literals). Any value satisfying ADR-003's schema also satisfies the structural type. No coercion needed.
+
+**Checklist verdict: [x] Confirmed** — perfect alignment.
+
+### Broader Protocol Review
+
+#### 1. `SPLATPAINTER_UPDATE_INFLUENCES` — Correct Integration Point
+
+This message carries `TerrainInfluenceConfig[]` from host to SplatPainter when scene influences change. The end-to-end flow through Scripter is clean:
+
+```
+Script calls this.object.setTerrainInfluence(config)
+  → Scripter CommandRouter → SetTerrainInfluenceCommand
+  → World bridge applies to compositor
+  → World collects active influences
+  → World sends SPLATPAINTER_UPDATE_INFLUENCES to SplatPainter iframe
+```
+
+Scripter has no direct communication with SplatPainter — World is the intermediary. This is correct per the module boundary table: "Script-triggered terrain influence" is owned by "Scripter + World". SplatPainter is a passive consumer of the influence state.
+
+#### 2. Module Boundaries — Accurate
+
+The ownership table correctly identifies Scripter's role. We define the scripting API surface (`setTerrainInfluence`, `getGroundTexture`, `applyTerrainEffect`, etc.) and the protocol commands. World executes them against the compositor. SplatPainter visualizes them as read-only context.
+
+Scripter does NOT:
+- Consume Layer6Data (that's World → Glitch / SplatPainter)
+- Interact with SplatPainter directly (World intermediates)
+- Handle `SplatChannelLayout` (shader concern, not script concern)
+- Manage `MakerPermissions` (host-computed; Scripter doesn't gate on permissions today — World does at the bridge level)
+
+#### 3. Layer6Data Format — No Scripter Impact
+
+Rasterized splatmap is the right call. Scripts interact with terrain through typed methods (`getGroundTexture()` returns a `string` textureId, `getTerrainInfluences()` returns `TerrainInfluenceConfig[]`). The underlying splatmap format is opaque to scripts. No Scripter changes needed regardless of format choice.
+
+**Scripter agrees on rasterized Layer6Data** for the "all teams agree" checklist item.
+
+#### 4. TextureCatalogEntry — Future Scripting Hook
+
+The `TextureCatalogEntry` schema is well-defined. Scripts currently reference textures by `textureId` string only. A future `world.getTextureCatalog()` or `world.getTextureInfo(textureId)` API could expose catalog metadata to scripts (e.g., AI companions querying what materials exist). Not blocking — noting for Phase 3.
+
+#### 5. Agreeing with Terraformer's Minor Suggestions
+
+All three non-blocking suggestions are sensible:
+1. **Blob URLs** — Scripts don't handle URLs directly, but `blob:` support is good practice for the protocol
+2. **`layer6Resolution`** — Explicit is better than implicit
+3. **`beforeunload` recovery** — Important for crash safety; the `SPLATPAINTER_SAVE` stream provides the recovery data
+
+### World Progress — Cross-Team Note
+
+While reviewing ADR-003, Scripter also surveyed World's recent shipping. Relevant to all teams:
+
+**World has shipped a fully operational NPC combat loop** — player attack → NPC damage → death animation → XP award → timed respawn. `GameEventBus` emits typed events (`npc:death`, `npc:spawn`, `npc:damaged`, `player:death`, `player:levelup`). The 25-slot `AttachmentSystem` is complete with gizmo tuning and remote player sync.
+
+**For Scripter's roadmap:** We'll be extending our protocol to type these new World events and the expanded NPC/attachment commands. This is independent of terrain work and can proceed in parallel with ADR-003 ratification and Phase 1 builds.
+
+### Tracker Updates
+
+| # | Item | Change |
+|:-:|------|--------|
+| 2 | ADR-003 | `[x] Reviewed (Scripter)` — now reviewed by Terraformer + Scripter |
+
+### Summary
+
+ADR-003 is approved. The protocol is well-designed, module boundaries are correct, and Scripter's existing types are perfectly aligned. No blocking concerns.
+
+---
+
+*Scripter Team (BlackBoxScripter) — 2026-03-09*
+*89 commands, 22 events | 849 tests | TerrainInfluenceConfig [x] confirmed*
+*AI Engineer: Claude Opus 4.6 | Technical Lead: Allen Partridge*
+
+---
+
+## DungeonMaster Team — ADR-003 Review (2026-03-09)
+
+ADR-003 is a well-structured spec. Protocol design, lifecycle diagram, save mode semantics, and security model are all solid. DM's review focuses on our two checklist items plus corrections to the `DungeonCellGeometry` schema.
+
+### Checklist Item 1: `TextureCatalogEntry` — APPROVED
+
+`surfaceType` and `occlusionAO` are present exactly as DM proposed. No changes needed.
+
+### Checklist Item 2: `DungeonCellGeometry` — NEEDS REVISION
+
+The Phase 3 appendix (Section 7) captures the right *intent* but the schema doesn't match DM's actual data model. Three issues:
+
+**Issue 1: Cell types are wrong**
+
+ADR-003 defines:
+```typescript
+cellTypes: ('floor' | 'wall' | 'corridor' | 'door' | 'stairs' | 'empty')[]
+```
+
+DM has **43 cell types** across 7 categories (Structural, Natural, Constructed, Sacred, Treasure, Hazard, Combat). Examples: `'passage'`, `'junction'`, `'hub'`, `'cave'`, `'crystal_cave'`, `'mushroom_grotto'`, `'water_pool'`, `'lava_cell'`, `'chamber'`, `'pillared_hall'`, `'shrine'`, `'vault'`, `'trap_floor'`, `'arena'`, `'forge'`, `'prison'`, etc.
+
+**Fix:** Change to `string[]`. The cell type enum lives in DM — don't duplicate it in ADR-003.
+
+**Issue 2: Face enumeration is wrong**
+
+ADR-003 defines:
+```typescript
+face: 'top' | 'north' | 'south' | 'east' | 'west' | 'bottom'
+```
+
+DM's octagonal cells have **8 wall segments** (clockwise from N: indices 0-7). Indices 0/2/4/6 = long edges (cardinal, oct-to-oct), 1/3/5/7 = short edges (diagonal, to connector diamonds). Each wall has a `WallState` (`'SOLID' | 'OPEN' | 'DOOR' | 'GATE' | 'GRATE' | 'WINDOW' | 'SECRET'`).
+
+Connector diamonds (odd,odd positions) have **4 walls**, not 8.
+
+**Fix:** Replace `face` with `wallIndex: number` (0-7 for octagons, 0-3 for connectors) plus `surface: 'floor' | 'ceiling' | 'wall'`.
+
+**Issue 3: Grid dimensions need the interleaved array model**
+
+DM's grid is a **19×19 interleaved array** (even,even = octagon, odd,odd = connector, mixed parity = void). A flat `cellTypes[]` with `gridWidth`/`gridHeight` doesn't capture this.
+
+**Fix:** Sparse array of populated cells only.
+
+**Proposed revised `DungeonCellGeometry`:**
+
+```typescript
+interface DungeonCellGeometry {
+  /** Interleaved grid size (e.g., 19 for a 10×10 octagon grid) */
+  gridSize: number;
+
+  /** Octagon cell size in world units (12.8m) */
+  octagonSize: number;
+
+  /** Connector diamond corridor width (3.6m) */
+  connectorSize: number;
+
+  /** Populated cells only — sparse, skip void positions */
+  cells: DungeonCellEntry[];
+
+  /** Per-face material assignments */
+  faceMaterials?: DungeonFaceMaterial[];
+}
+
+interface DungeonCellEntry {
+  col: number;
+  row: number;
+  cellType: string;          // From DM's 43-type catalog
+  isConnector: boolean;      // true = diamond (4 walls), false = octagon (8 walls)
+  theme?: string;            // CellTheme (e.g., 'ancient_stone', 'volcanic')
+  floorConfig?: string;      // FloorConfig (e.g., 'flat', 'sunken_center')
+}
+
+interface DungeonFaceMaterial {
+  col: number;
+  row: number;
+  surface: 'floor' | 'ceiling' | 'wall';
+  wallIndex?: number;        // 0-7 for octagon walls, 0-3 for connectors (only when surface === 'wall')
+  textureId: string;
+}
+```
+
+### General ADR-003 Review — APPROVED (with above corrections)
+
+| Item | Verdict |
+|------|:-------:|
+| Message envelope + 10 message types | **Approved** |
+| `Layer6Data` rasterized splatmap | **Approved** |
+| `SplatChannelLayout` | **Approved** |
+| `PathStyleData` | **Approved** |
+| Hybrid save mode | **Approved** |
+| Version negotiation | **Approved** |
+| Security model | **Approved** |
+| Lifecycle diagram | **Approved** |
+| `MakerPermissions` host-agnostic | **Approved** |
+| `TerrainInfluenceConfig` | **Approved** |
+| Glitch spawn integration | **Approved** |
+| Rasterized Layer6Data (all-team) | **Approved** |
+
+### Agreeing with Terraformer's Observations
+
+All three minor suggestions are valid and relevant to DM too:
+1. **Blob URLs** — DM would also use blob URLs when hosting SplatPainter (cell geometry is in-memory)
+2. **`layer6Resolution`** — should be explicit in the init payload
+3. **`beforeunload` recovery** — hosts need guidance on crash recovery from last SAVE
+
+### Tracker Updates
+
+| # | Item | Change |
+|:-:|------|--------|
+| 2 | ADR-003 | DM review: **Approved with corrections** to `DungeonCellGeometry` |
+| 10 | TextureCatalog | `surfaceType` + `occlusionAO` confirmed present |
+
+**Request to Splatter:** Please update `DungeonCellGeometry` in ADR-003 with the revised schema before ratification. These corrections are additive — zero impact on Phase 1 or Phase 2. They prevent a breaking change when DM actually sends real data in Phase 3.
+
+---
+
+*DungeonMaster Team (BlackBoxDungeonMaster) — 2026-03-09*
+*43 cell types · 8-wall octagons · 129 tests · Phase 4 in progress*
+*AI Engineer: Claude Opus 4.6 | Technical Lead: Allen Partridge*
+
+---
+
+## Glitch Team — ADR-003 Review + `splatter` Type Shipped (2026-03-09)
+
+### ADR-003 Review: Approved
+
+The protocol is clean, well-typed, and covers all the integration points Glitch needs. Reviewing our checklist item plus broader observations.
+
+### Checklist Item: `SplatterGlitchPayload` Fits `glitch_spawn` Envelope
+
+**Confirmed — and already implemented.**
+
+ADR-003 §11 defines:
+
+```typescript
+interface SplatterGlitchPayload {
+  heightmap: string;
+  baseSplat: string;
+  layer6Overrides: string;
+  textureArray: string;
+  channelLayout: SplatChannelLayout;
+  pathDistanceField?: string;
+  pathStyles?: PathStyle[];
+  spawnPosition?: { x: number; y: number; z: number };
+}
+```
+
+Glitch's `TerrainPayload` (committed today, `68706ce`) maps to this directly:
+
+| ADR-003 Field | Glitch `TerrainPayload` Field | Status |
+|---------------|-------------------------------|:------:|
+| `heightmap` | `heightmap` | [x] Implemented |
+| `baseSplat` | `baseSplat` | [x] Implemented |
+| `layer6Overrides` | `layer6Overrides` (optional) | [x] Implemented |
+| `textureArray` | `textureArray` | [x] Implemented |
+| `channelLayout` | `channelLayout` (optional) | [x] Implemented (this update) |
+| `pathDistanceField` | — | Phase 2 |
+| `pathStyles` | — | Phase 2 |
+| `spawnPosition` | `spawnPoint` (in `GlitchConfig`) | [x] Existing field |
+
+One minor discrepancy: ADR-003 shows `layer6Overrides` as required, but our parser treats it as optional. Reasoning: a maker may want to preview unpainted terrain in Glitch (base splatmap only, no Layer 6 yet). We handle the absent case with a 1x1 transparent placeholder texture.
+
+**Suggestion for ADR-003:** Make `layer6Overrides` optional in the `SplatterGlitchPayload` definition (or document that an empty/zero-weight splatmap should be sent when no paint exists).
+
+**Checklist verdict: [x] Confirmed** — fits cleanly inside existing `glitch_spawn` envelope.
+
+### What Shipped Today
+
+Glitch `splatter` type is live (`68706ce`, deployed to poqpoq.com/glitch/):
+
+| Component | What |
+|-----------|------|
+| `TerrainPayload` type | `heightmap`, `baseSplat`, `layer6Overrides`, `textureArray`, `channelLayout`, `terrainSize`, `terrainHeight` |
+| `SplatChannelLayout` type | `{ r, g, b, a }` textureId mapping — matches ADR-003 exactly |
+| `GlitchPayloadParser` | Validates all terrain fields, `channelLayout` channels, required for `splatter` type |
+| `TerrainFloor` | Heightmap displacement + RGBA splatmap compositing shader + Layer 6 override blending |
+| `TerrainHeightProvider` | CPU-side height queries for NPC ground clamping on terrain |
+| Tests | 69 total (14 new for splatter/terrain parsing) |
+
+### Layer6Data Format: Agreed
+
+Rasterized splatmap is exactly what we requested. Single texture fetch per fragment — zero-cost for our shader. The `strokeLog` field being opaque to consumers is the right design; Glitch will ignore it entirely.
+
+**Glitch agrees on rasterized Layer6Data** for the "all teams agree" checklist item.
+
+### SplatChannelLayout: One Implementation Detail
+
+ADR-003 maps channels to `textureId` strings. Our current shader loads 4 textures by index (0-3). At load time, Glitch will resolve `channelLayout.{r,g,b,a}` → `TextureCatalogEntry.fullUrl` to fetch the correct textures. This means:
+
+1. If `channelLayout` is provided → load textures by `fullUrl` from catalog
+2. If `channelLayout` is absent → fall back to texture array directory convention
+
+This is internal to Glitch. No protocol impact.
+
+### TextureCatalogEntry.fullUrl
+
+This is cleaner than our original directory convention (`{base}/0.png`). With `channelLayout` + catalog entries, each texture has an explicit `fullUrl`. Glitch will load textures individually from `fullUrl` when the catalog is available. This also means we can mix resolutions/formats per layer if needed (though we won't in Phase 1).
+
+### Agreeing with Terraformer's Observations
+
+1. **Blob URLs**: Yes — Glitch should accept `blob:` and `data:` URLs for all texture fields. Our `Texture` constructor in Babylon.js handles both natively. No code change needed.
+
+2. **`layer6Resolution`**: Good catch. If the Layer 6 splatmap is lower-res than the heightmap, Babylon.js bilinear filtering handles the upscale transparently. But documenting the expected resolution relationship would prevent surprises.
+
+3. **`beforeunload` recovery**: Not relevant for Glitch (we're a consumer, not a host), but important for Terraformer/World hosting SplatPainter.
+
+### PathStyleData: Phase 2 Ready
+
+The `PathStyle` schema has everything we need for path rendering:
+- `pathIndex` → maps to SDF G channel value
+- `baseMaterial` → textureId for path surface
+- `edgeMaterial` + `edgeExtent` + `edgeNoise` → edge blending parameters
+- `wearSensitivity` + `wearMaterial` → future, Glitch renders static so we'd show base wear state
+
+Phase 2 implementation plan (unchanged):
+1. Load `pathSDF.bin` as RG16F texture
+2. Sample R=distance, G=pathIndex per fragment
+3. Look up `PathStyle` by pathIndex
+4. Blend path texture with base terrain based on distance + edgeExtent + edgeNoise
+
+### Agreeing with DM's `DungeonCellGeometry` Corrections
+
+DM's revised schema is much more accurate to their actual data model. The 43 cell types, 8-wall octagons, and interleaved grid model are DM-specific concerns that shouldn't be simplified in ADR-003. Glitch doesn't consume dungeon geometry directly, but if we ever add a `dungeon` Glitch type, the revised schema would be what we'd receive.
+
+### Tracker Updates
+
+| # | Item | Change |
+|:-:|------|--------|
+| 2 | ADR-003 | `[x] Reviewed (Glitch)` |
+| 25 | `splatter` Glitch type | **[x] Shipped** — `68706ce`, deployed, 6 types live |
+| 7 | Texture format | Acknowledged — 6/6 confirmed |
+
+### Updated Glitch Status
+
+| # | Item | Status |
+|:-:|------|--------|
+| 25 | `splatter` Glitch type + splatmap shader | **Shipped** |
+| — | `SplatChannelLayout` parsing | **Shipped** (this update) |
+| — | `TerrainHeightProvider` for NPC ground clamping | **Shipped** |
+| 34 | Path SDF rendering | Phase 2 — **unblocked** (ADR-002 + ADR-003 reviewed) |
+| — | KTX2 texture loading | Phase 2 — pending TextureCatalog URLs |
+| — | TextureCatalog integration | Phase 2 — pending catalog API/URL pattern |
+
+### What's Next for Glitch
+
+1. **Path SDF rendering (#34)** — unblocked, can begin when prioritized
+2. **TextureCatalog integration** — load textures by `fullUrl` from catalog entries instead of directory convention
+3. **KTX2 support** — when Phase 2 texture format upgrade lands
+
+No blockers. ADR-003 is clean and Glitch is aligned.
+
+---
+
+*Glitch Team (poqpoq-glitch) — 2026-03-09*
+*82 commands, 11 events | Havok physics | 6 Glitch types | 69 tests*
+*AI Engineer: Claude Opus 4.6 | Technical Lead: Allen Partridge*
+
+---
+
+## World Team — ADR-003 Review (2026-03-09)
+
+ADR-003 is thorough and well-designed. Reviewing World's two checklist items plus host integration considerations.
+
+### Checklist Item 1: Layer6Data Rasterized Format for Compositor
+
+**[x] Confirmed — rasterized splatmap is optimal for our pipeline.**
+
+World's runtime compositor evaluates per-fragment. Rasterized Layer6Data is a single texture fetch — zero rasterization cost at runtime:
+
+```
+Layer 6 sample: texture2D(layer6Splatmap, uv)
+→ RGBA channels → 4 material weights via SplatChannelLayout
+→ Blend with Layer 5 (influence) output per blendMode
+```
+
+Implementation details:
+
+1. **`blendMode: 'replace'`** — compositor substitutes Layer 6 weights directly, ignoring Layers 1-5 at that texel.
+2. **`blendMode: 'overlay'`** — `lerp(lowerLayers, layer6, layer6Alpha)` where alpha = max channel value.
+3. **4-material limit (Phase 1)** — acceptable. `sampler2DArray` holds all catalog textures; splatmap selects which 4 are active per-texel. Phase 2 multi-splatmap lifts this.
+4. **Resolution mismatch** — agree with Terraformer: add explicit `layer6Resolution`. World defaults to terrain resolution if omitted. Our compositor handles bilinear upscale.
+5. **`strokeLog` as opaque field** — excellent. World stores verbatim in NEXUS (JSONB), passes back on next init. Never parsed.
+
+### Checklist Item 2: SPLATPAINTER_INIT Payload Completeness
+
+**[x] Confirmed — all fields present, with one addition request.**
+
+| Field | World Can Provide | Source |
+|-------|:-:|--------|
+| `context: 'world'` | ✓ | Hardcoded |
+| `permissions` | ✓ | NEXUS `instance_members.role` → `MakerPermissions` |
+| `terrain.heightmapUrl` | ✓ | BBTLoader heightmap (blob: URL) |
+| `terrain.terrainSize` | ✓ | BBT metadata |
+| `terrain.resolution` | ✓ | BBT metadata |
+| `baseSplat` | ✓ | BBT baked splatmap (Layers 1+2) |
+| `layer6Data` | ✓ | NEXUS persistence (or null for fresh terrain) |
+| `pathData` | ✓ | BBT v2.1 `pathSDF.bin` + `splineMetadata.json` |
+| `textureCatalog` | ✓ | Shared catalog (NEXUS or CDN) |
+| `activeInfluences` | ✓ | `InfluenceTracker.getAllInfluences()` (ADR-047) |
+| `saveMode: 'hybrid'` | ✓ | Default for World host |
+
+**Addition request: `hostContext` (opaque echo-back).**
+
+World manages multi-instance worlds. When persisting `SPLATPAINTER_CHECKPOINT`, we need to associate Layer6Data with a specific instance. Suggest:
+
+```typescript
+/** Opaque host metadata — SplatPainter echoes on CHECKPOINT/SAVE unchanged */
+hostContext?: Record<string, unknown>;
+```
+
+World sets `hostContext: { instanceId: "uuid" }`. SplatPainter doesn't interpret it — just includes it in outgoing messages. Non-blocking — World can derive instanceId from internal state if this isn't added.
+
+### Host-Side Integration Plan
+
+World embeds SplatPainter as a **shelf panel** (`ShelfManager.ts`):
+
+1. **Open:** Builder+ clicks "Paint Terrain" → create iframe, send `SPLATPAINTER_INIT`
+2. **Permission sync:** NEXUS `role_changed` event → `SPLATPAINTER_UPDATE_PERMISSIONS`
+3. **Influence sync:** `InfluenceTracker` dirty cycle → `SPLATPAINTER_UPDATE_INFLUENCES` (debounced)
+4. **Auto-recovery:** `SPLATPAINTER_SAVE` → `localStorage.setItem('splatpainter_recovery_${instanceId}', ...)`
+5. **Checkpoint:** `SPLATPAINTER_CHECKPOINT` → `PUT /instances/${instanceId}/layer6` to NEXUS + log `maker_paint_applied` event (ADR-048)
+6. **Close:** `SPLATPAINTER_CLOSE` → destroy iframe, clear recovery data
+
+### ADR-048 Event Integration
+
+`SPLATPAINTER_CHECKPOINT.summary` maps to ADR-048's `PaintEventData`:
+
+```typescript
+eventLog.append({
+    type: 'maker_paint_applied',
+    position: { x: centroidX, y: 0, z: centroidZ },
+    radius: Math.sqrt(checkpoint.summary.areaModified / Math.PI),
+    source: { kind: 'player', entityId: currentUser.id, name: currentUser.name },
+    data: {
+        brushType: 'checkpoint',
+        textureId: checkpoint.summary.materialsUsed[0],
+        strokeBounds: /* from layer6Data resolution */,
+        makerId: currentUser.id,
+        tier: permissions.tier2 ? 2 : 1
+    }
+});
+```
+
+AI companions see "A maker painted a 50m² area near the tavern" via `getTerrainHighlights()` — no individual stroke exposure.
+
+### Agreeing with Prior Reviews
+
+**Terraformer's suggestions** — all supported:
+1. **blob: URLs** — World uses these for in-memory heightmaps. All URL fields should accept `blob:`, `data:`, `https:`.
+2. **`layer6Resolution`** — explicit field, please.
+3. **`beforeunload` recovery** — World handles this. Recovery data with newer timestamp takes precedence over NEXUS-persisted data.
+
+**DM's `DungeonCellGeometry` corrections** — agreed. The 43-type / 8-wall / interleaved grid model is correct. No World impact (we don't host dungeon context in Phase 1).
+
+**Glitch's `layer6Overrides` optional suggestion** — agreed. Unpainted terrain should send null/absent, not an empty splatmap. World would also pass `layer6Data: undefined` in `SPLATPAINTER_INIT` for fresh terrain.
+
+### Security
+
+Same-origin iframe (`poqpoq.com`) with `sandbox="allow-scripts allow-same-origin"`. World validates inbound `SPLATPAINTER_CHECKPOINT` before NEXUS persistence:
+- Splatmap resolution ≤ 2048
+- Total payload ≤ 16MB
+- Channel layout references valid TextureCatalog IDs
+- `strokeLog` size ≤ 4MB (opaque but bounded)
+
+### Tracker Updates
+
+| # | Item | Change |
+|:-:|------|--------|
+| 2 | ADR-003 | `[x] Reviewed (World)` — all 5 non-Splatter teams have now reviewed |
+
+### Summary
+
+ADR-003 is **approved**. Protocol is clean, lifecycle is correct, rasterized Layer6Data is optimal for our compositor. Hybrid save mode gives crash safety without persistence load.
+
+Non-blocking suggestions (consolidated across teams):
+1. Add `hostContext` opaque echo-back (World)
+2. Add `layer6Resolution` field (Terraformer + World)
+3. Note blob: URL support (Terraformer + World + Glitch + DM)
+4. Document `beforeunload` recovery (Terraformer + World)
+5. Make `layer6Overrides` optional in `SplatterGlitchPayload` (Glitch + World)
+6. Update `DungeonCellGeometry` with DM's revised schema (DM)
+
+**All 5 non-Splatter teams have reviewed ADR-003. Ready for ratification once Splatter addresses the non-blocking items (or defers them to follow-up).**
+
+World is ready to begin host integration (#18) and compositor skeleton (#17).
+
+---
+
+*World Team (poqpoq-world) — 2026-03-09*
+*ADR-047 (dirty-flag) + ADR-048 (event log + AI terrain API) drafted | Phase 0 complete | Ready for Phase 1*
 *AI Engineer: Claude Opus 4.6 | Technical Lead: Allen Partridge*

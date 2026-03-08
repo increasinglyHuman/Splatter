@@ -629,12 +629,12 @@ Host                                    SplatPainter
 
 - [ ] **World team:** Confirm Layer6Data rasterized format works for compositor consumption
 - [ ] **World team:** Confirm `SPLATPAINTER_INIT` payload has all fields needed for iframe hosting
-- [ ] **Terraformer team:** Confirm `SplatChannelLayout` matches `TextureArrayBuilder` output
-- [ ] **Terraformer team:** Confirm `pathData` field in init payload matches ADR-002 contract
-- [ ] **DungeonMaster team:** Confirm `DungeonCellGeometry` captures what DM would send
-- [ ] **DungeonMaster team:** Confirm `TextureCatalogEntry` includes `surfaceType` + `occlusionAO`
+- [x] **Terraformer team:** Confirm `SplatChannelLayout` matches `TextureArrayBuilder` output — **Compatible.** N-Zone uses procedural height/slope evaluation (not baked RGBA splatmap), so we'll bake top-4 zones on-demand via offscreen render. Phase 2 multi-splatmap for >4 zones.
+- [x] **Terraformer team:** Confirm `pathData` field in init payload matches ADR-002 contract — **Exact match.** `sdfUrl` → `pathSDF.bin`, `splineMetadata` → `splineMetadata.json`. Dual-keying (pathIndex + pathId) confirmed.
+- [x] **DungeonMaster team:** Confirm `DungeonCellGeometry` captures what DM would send — **Approved with corrections.** Schema needs revision: 43 cell types (not 6), 8-wall octagons (not 4-face), sparse interleaved grid (not flat array). Revised `DungeonCellGeometry` proposed in Comms.md. Phase 3 appendix — no Phase 1/2 impact.
+- [x] **DungeonMaster team:** Confirm `TextureCatalogEntry` includes `surfaceType` + `occlusionAO` — **Confirmed.** Both fields present exactly as proposed.
 - [ ] **Glitch team:** Confirm `SplatterGlitchPayload` fits `glitch_spawn` envelope
-- [ ] **Scripter team:** Confirm `TerrainInfluenceConfig` matches types in `world-object.ts`
+- [x] **Scripter team:** Confirm `TerrainInfluenceConfig` matches types in `world-object.ts` — **Exact match.** All 11 fields identical in type and optionality. Bridge layer `TerrainInfluenceConfigLike` uses structural typing (wider `string` for enums) — any ADR-003 value satisfies it.
 - [ ] **All teams:** Agree on `Layer6Data` rasterized format (vs. stroke-based alternative)
 
 ---
